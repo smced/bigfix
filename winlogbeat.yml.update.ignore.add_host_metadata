@@ -1,0 +1,104 @@
+parameter "PowerShell"="{pathname of file ((it as string) of value "Path" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell" of native registry)}"
+parameter "InstallPath"="{pathname of native program files folder}\Verve Industrial Protection\Asset Manager"
+parameter "Script"="{pathname of native program files folder}\Verve Industrial Protection\Asset Manager\Winlogbeat\install-service-winlogbeat.ps1"
+parameter "Beat"="Winlogbeat"
+
+// Error Codes
+
+parameter "errorCopySource"="1000"
+// Error Copying Sources Files to Installation Path
+
+parameter "errorFileRename"="1001"
+// Error Renaming prefetch files prior to copying
+
+parameter "errorCreateService"="1002"
+// Error creating the beats service
+
+//stop service
+waithidden net stop winlogbeat
+
+//Create actual config file
+createfile until __end
+{{
+    "winlogbeat": {{
+        "event_logs": [
+            {{
+                "name": "Application",
+                "ignore_older": "144h"
+            },
+            {{
+                "name": "Security",
+                "ignore_older": "144h",
+            },
+            {{
+                "name": "System",
+                "ignore_older": "144h"
+            },
+            {{
+                "name": "Microsoft-Windows-Windows Defender/Operational",
+                "ignore_older": "144h"
+            },
+            {{
+                "name": "Microsoft-Windows-TerminalServices-LocalSessionManager/Operational",
+                "ignore_older": "144h"
+            }
+        ]
+    },
+    "processors": [
+        {{
+            "drop_event.when.or": [
+                {{
+                    "equals.winlog.event_id": "5156"
+                },
+                {{
+                    "equals.winlog.event_id": "5158"
+                },
+                {{
+                    "equals.winlog.event_id": "3006"
+                },
+                {{
+                    "equals.winlog.event_id": "4703"
+                },
+                {{
+                    "equals.winlog.event_id": "4658"
+                },
+                {{ 
+                    "or": [
+                    {{
+                        "equals.process.name": "WmiPrvSE.exe"
+                    },
+                    {{
+                        "equals.process.name": "BESClient.exe"
+                        }
+                ]}
+            ]
+        },
+        {{
+            "script": {{
+                "lang": "javascript",
+                "source": "function process(event) {{ var pipeline = ['winlogbeat', event.Get('agent.version'), 'routing'].join('-'); event.Put('vam_log_collector.original_pipeline', pipeline) }"
+            }
+        }
+    ],
+    "output": {{
+        "logstash": {{
+            "hosts": [
+                "${{VAM_LOG_SERVER}"
+            ],
+            "ssl": {{
+                "enabled": true,
+                "verification_mode": "none"
+            }
+        }
+    }
+}
+__end
+
+
+delete "{parameter "InstallPath"}\{parameter "Beat"}\{parameter "Beat"}.yml"
+copy __createfile "{parameter "InstallPath"}\{parameter "Beat"}\{parameter "Beat"}.yml"
+
+
+
+//start the service
+waithidden net start winlogbeat
